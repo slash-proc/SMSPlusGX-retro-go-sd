@@ -1,25 +1,45 @@
-# Retro-Go SD template — one project = one CORE or one GWHB homebrew.
+# SMSPlus GX — Sega Master System / Game Gear / SG-1000 / Colecovision
+# standalone dynamic core for Game & Watch Retro-Go SD.
 #
-#   make                  — build + pack (default: PROJECT_KIND=core)
-#   make PROJECT_KIND=homebrew
+#   make                  — build + pack → sms.bin
 #   make docker           — same build inside Docker (no host toolchain)
 #   make docker_shell     — interactive shell in the builder image
 #
-# Customize CORE_NAME / pack metadata below, then replace src/main.c.
+# Coleco BIOS is expected on the SD card at /bios/coleco/coleco.bin.
 # Verbose compiler lines: make V=
 
 #######################################
 # Project identity
 #######################################
-# core     → pack_core.py     → /cores/<name>.bin
-# homebrew → pack_homebrew.py → /homebrews/<name>.bin
 PROJECT_KIND ?= core
 
-CORE_NAME  := example
-CORE_ENTRY := app_main
+CORE_NAME  := sms
+CORE_ENTRY := app_main_smsplusgx
+
+CORE_SMS := src/smsplus
 
 CORE_C_SOURCES := \
-src/main.c
+$(CORE_SMS)/loadrom.c \
+$(CORE_SMS)/render.c \
+$(CORE_SMS)/sms.c \
+$(CORE_SMS)/state.c \
+$(CORE_SMS)/vdp.c \
+$(CORE_SMS)/pio.c \
+$(CORE_SMS)/tms.c \
+$(CORE_SMS)/memz80.c \
+$(CORE_SMS)/system.c \
+$(CORE_SMS)/cpu/z80.c \
+$(CORE_SMS)/sound/emu2413.c \
+$(CORE_SMS)/sound/fmintf.c \
+$(CORE_SMS)/sound/sn76489.c \
+$(CORE_SMS)/sound/sms_sound.c \
+src/main_smsplusgx.c
+
+CORE_C_INCLUDES := \
+-I$(CORE_SMS) \
+-I$(CORE_SMS)/cpu \
+-I$(CORE_SMS)/sound \
+-Isrc
 
 # Relative path so Docker bind-mounts work (do NOT use $(abspath) — it
 # bakes the host path into Make prerequisites / .d files). Do not name
@@ -28,86 +48,52 @@ GNW_CORE_SDK ?= sdk
 # Separate build trees so switching PROJECT_KIND does not reuse stale .o.
 BUILD_DIR ?= build/$(PROJECT_KIND)
 
+# Hot Z80 / FM / PSG / VDP .text in ITCM (see sms_core.ld).
+CORE_LDSCRIPT := sms_core.ld
+CORE_EXTRA_SEGMENTS := itcm:core_itcm
+
 #######################################
 # Kind-specific compile defs + packing
 #######################################
 ifeq ($(PROJECT_KIND),core)
 # Match release-firmware layout of retro_emulator_file_t: COVERFLOW fields
 # sit before cheat_* — CHEAT_CODES alone with COVERFLOW=0 misaligns pointers.
-# MAX_CHEAT_CODES mirrors Makefile.common's release default.
+# SMS family has no cheat files (leave --cheat-ext unset / empty).
 CORE_C_DEFS := \
 -DPROJECT_KIND_CORE=1 \
 -DCOVERFLOW=1 \
--DCHEAT_CODES=1 \
--DMAX_CHEAT_CODES=13
+-DCHEAT_CODES=0 \
+-DTARGET_GNW
 
-PACKED_BIN  := $(CORE_NAME).bin
-PAD_LOGO    := src/assets/pad.png
-HEADER_LOGO := src/assets/header.png
+PACKED_BIN := SmsPlusGX.bin
 
 else ifeq ($(PROJECT_KIND),homebrew)
-CORE_C_DEFS := \
--DPROJECT_KIND_HOMEBREW=1
-
-PACKED_BIN := ExampleHB.bin
-COVER_JPG  := $(BUILD_DIR)/cover.jpg
-
+$(error This project is a dynamic core only (PROJECT_KIND=core))
 else
-$(error PROJECT_KIND must be 'core' or 'homebrew' (got '$(PROJECT_KIND)'))
+$(error PROJECT_KIND must be 'core' (got '$(PROJECT_KIND)'))
 endif
 
 include $(GNW_CORE_SDK)/Makefile
 
-PACK_CORE     := $(GNW_CORE_SDK)/tools/pack_core.py
-PACK_HOMEBREW := $(GNW_CORE_SDK)/tools/pack_homebrew.py
+PACK_CORE := $(GNW_CORE_SDK)/tools/pack_core.py
 
 #######################################
-# Pack
+# Pack — one binary, four launcher systems
 #######################################
-.PHONY: pack cover
+.PHONY: pack
 
-ifeq ($(PROJECT_KIND),core)
-
-pack: $(TARGET_BIN) $(PAD_LOGO) $(HEADER_LOGO)
+pack: $(TARGET_BIN)
 	$(V)$(ECHO) [ PACK CORE ] $(PACKED_BIN)
 	$(V)python3 $(PACK_CORE) \
 		--elf $(TARGET_ELF) --bin $(TARGET_BIN) \
-		--system-name "Example Core" --dirname example \
-		--extensions "bin" \
-		--core-name "Example" \
+		--system name="Sega Master System",dirname=sms,pad_logo=src/assets/pad_sms.bmp,header_logo=src/assets/header_sms.bmp,ext=sms,parse=rom \
+		--system name="Sega Game Gear",dirname=gg,pad_logo=src/assets/pad_gg.bmp,header_logo=src/assets/header_gg.bmp,ext=gg,parse=rom \
+		--system name="Sega SG-1000",dirname=sg,pad_logo=src/assets/pad_sg.bmp,header_logo=src/assets/header_sg.bmp,ext=sg,parse=rom \
+		--system name="Colecovision",dirname=col,pad_logo=src/assets/pad_col.bmp,header_logo=src/assets/header_col.bmp,ext=col,parse=rom \
+		--logo-invert \
+		--core-name "SMSPlus GX" \
 		--version 1.0.0 \
-		--cheat-ext ggcodes \
-		--pad-logo $(PAD_LOGO) \
-		--header-logo $(HEADER_LOGO) \
 		--out $(PACKED_BIN)
-
-else
-
-.PHONY: cover
-cover: $(COVER_JPG)
-
-# Must fit gui.c COVER_MAX_WIDTH x COVER_MAX_HEIGHT (186x100) and
-# COVER_SIZE (10 KiB) — oversized covers smash the HW JPEG scratch.
-$(COVER_JPG):
-	@mkdir -p $(BUILD_DIR)
-	python3 -c "from pathlib import Path; from PIL import Image, ImageDraw, ImageFont; \
-img=Image.new('RGB', (186,100), (32,48,96)); \
-d=ImageDraw.Draw(img); \
-d.rectangle((8,8,177,91), outline=(220,220,255), width=2); \
-d.text((20,38), 'Example HB', fill=(255,255,255)); \
-img.save('$(COVER_JPG)', 'JPEG', quality=85, optimize=True); \
-sz=Path('$(COVER_JPG)').stat().st_size; \
-assert sz <= 10*1024, f'cover too big: {sz}'"
-
-pack: $(TARGET_BIN) $(COVER_JPG)
-	$(V)$(ECHO) [ PACK GWHB ] $(PACKED_BIN)
-	$(V)python3 $(PACK_HOMEBREW) \
-		--elf $(TARGET_ELF) --bin $(TARGET_BIN) \
-		--name "Example Homebrew" --version 1.0.0 \
-		--cover $(COVER_JPG) \
-		--out $(PACKED_BIN)
-
-endif
 
 all: pack
 
@@ -124,9 +110,6 @@ print-DOCKER_IMAGE:
 
 clean::
 	$(V)rm -f $(PACKED_BIN)
-ifeq ($(PROJECT_KIND),homebrew)
-	$(V)rm -f $(COVER_JPG)
-endif
 
 #######################################
 # Docker (same image as firmware repo)
@@ -146,8 +129,6 @@ DOCKER_RUN := docker run --rm $(DOCKER_TTY_FLAG) \
 	-w /opt/workdir \
 	$(DOCKER_IMAGE)
 
-# Compile inside the published builder image (uses the local copy).
-# Refresh with `make docker_pull` when you want a newer digest for the tag.
 docker:
 	$(V)$(ECHO) "[ DOCKER ]" $(DOCKER_IMAGE) "PROJECT_KIND=$(PROJECT_KIND)"
 	$(V)$(DOCKER_RUN) make --no-print-directory -j$$(nproc) PROJECT_KIND=$(PROJECT_KIND)
@@ -156,6 +137,5 @@ docker_pull:
 	$(V)$(ECHO) "[ PULL ]" $(DOCKER_IMAGE)
 	$(V)docker pull $(DOCKER_IMAGE)
 
-# Interactive shell with the same image / mount as `make docker`.
 docker_shell:
 	$(DOCKER_RUN) bash

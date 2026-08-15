@@ -1,12 +1,5 @@
 # Changelog
 
-This file is a template for the single project created from this repo.
-At project setup time you choose exactly one kind by setting `PROJECT_KIND`
-to `core` or `homebrew` (you will only build/release that chosen kind).
-
-Update the content for your project and keep the section heading matching
-the pushed release tag (CI requirement).
-
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release tags must
 match a section heading exactly (for example `v1.0.0`).
@@ -24,49 +17,28 @@ is also used in staged asset names (`<binary>-<tag>.bin`, `<binary>-<tag>.zip`).
 
 ### Added
 
-- (your changes here)
+- SMSPlus GX dynamic core: SMS, Game Gear, SG-1000, and Colecovision in one
+  packed `SmsPlusGX.bin` (four launcher systems).
+- Vendored engine under `src/smsplus/` and porting entry `src/main_smsplusgx.c`.
+- Per-system pad/header logos under `src/assets/`.
+- YM2413 FM sound (EMU2413) for Master System / Mark III FM games (Japanese
+  SMS built-in FM and compatible titles).
+- Hot Z80 / FM / PSG / VDP code in ITCM; LUT / FM / audio scratch via
+  `dtc_malloc` (DTCM).
 
 ### Changed
 
-- (your changes here)
-
-### Fixed
-
-- (your changes here)
-
-## [v1.0.0] - 2026-08-12
-
-Initial public release for your chosen kind (`core` or `homebrew`).
-
-### Added
-
-- Freestanding Cortex-M7 skeleton (`src/main.c`) with LCD demo, square-wave
-  audio, save/load/screenshot hooks, and watchdog-friendly frame loop.
-- Vendored SDK, linker scripts, and ABI bridge for `gw_firmware_abi_t`.
-- Packaging for both project kinds:
-  - **core** → `pack_core.py`, SD path `/cores/<name>.bin`
-  - **homebrew** → `pack_homebrew.py`, SD path `/homebrews/<name>.bin`
-- Docker builder integration (`make docker`) using `sylverb/retro-go-sd-builder`.
-- CI build on push/PR and automated GitHub Release on `v*` tags.
+- Project identity: `CORE_NAME=sms`, entry `app_main_smsplusgx` (was Example
+  template).
+- Core-only project (`PROJECT_KIND=homebrew` is no longer supported here).
 
 ### Install
 
-Only the section corresponding to your chosen `PROJECT_KIND` is relevant for
-your derived project.
-
-**Core (`PROJECT_KIND=core`, default)**
-
-- Copy `example.bin` to `/cores/` on the SD card.
-- Place test ROMs under `/roms/example/` (dirname matches `CORE_NAME` in the
-  Makefile).
+- Copy `SmsPlusGX.bin` to `/cores/` on the SD card.
+- Place ROMs under `/roms/sms/`, `/roms/gg/`, `/roms/sg/`, `/roms/col/`.
+- Colecovision BIOS: `/bios/coleco/coleco.bin`.
 - Requires firmware whose ABI matches `SDK_VERSION` in this repository.
 
-**Homebrew (`PROJECT_KIND=homebrew`)**
+## [v1.0.0] - 2026-08-12
 
-- Set `PROJECT_KIND=homebrew` in the Makefile, rebuild, then copy
-  `ExampleHB.bin` to `/homebrews/`.
-- Optional coverflow override: `/covers/homebrew/ExampleHB.img` (JPEG ≤186×100,
-  ≤10 KiB).
-
-The release archive contains the ready-to-copy SD layout for the active project
-kind only (`cores/` or `homebrews/`).
+Initial template release (Example core / homebrew skeleton).
