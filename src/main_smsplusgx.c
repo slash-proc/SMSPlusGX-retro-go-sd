@@ -18,7 +18,11 @@
 #include "gw_malloc.h"
 #include "odroid_overlay.h"
 
+#ifndef HOST_BUILD
 #include "gw_core_bridge.h"
+#else
+#include "host_compat.h"
+#endif
 
 #define SMS_WIDTH 256
 #define SMS_HEIGHT 192
@@ -55,9 +59,11 @@ static void blit_console();
 
 static uint8_t sms_engine_from_ext(void)
 {
-    if (strcmp(ACTIVE_FILE->ext, "col") == 0)
+    const char *ext = (ACTIVE_FILE && ACTIVE_FILE->ext) ? ACTIVE_FILE->ext : "";
+
+    if (strcmp(ext, "col") == 0)
         return SMSPLUSGX_ENGINE_COLECO;
-    if (strcmp(ACTIVE_FILE->ext, "sg") == 0)
+    if (strcmp(ext, "sg") == 0)
         return SMSPLUSGX_ENGINE_SG1000;
     return SMSPLUSGX_ENGINE_OTHERS;
 }

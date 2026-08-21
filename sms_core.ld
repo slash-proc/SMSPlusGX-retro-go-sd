@@ -15,6 +15,9 @@ MEMORY
 {
   RAM_EMU (xrw) : ORIGIN = __RAM_EMU_START__, LENGTH = __RAM_EMU_LENGTH__
   ITCM    (xrw) : ORIGIN = __ITCM_CORE_START__, LENGTH = __ITCM_CORE_LENGTH__
+  /* Not loaded by the firmware core loader — kept so
+     `objcopy --only-section=.coleco_bios_data` can emit the SD bios. */
+  COLECO_BIOS (r) : ORIGIN = 0x38000000, LENGTH = 8K
 }
 
 /* Object paths match BUILD_DIR=build/core (flat names under that dir). */
@@ -85,6 +88,12 @@ SECTIONS
 
   ASSERT(__CORE_ITCM_BSS_END__ <= __ITCM_CORE_START__ + __ITCM_CORE_LENGTH__,
          "Error: SMS core ITCM segment overflows the 64K ITCM region")
+
+  .coleco_bios_data :
+  {
+    . = ALIGN(4);
+    KEEP(*(.coleco_bios_data))
+  } > COLECO_BIOS
 
   __exidx_start = .;
   __exidx_end = .;

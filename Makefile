@@ -1,12 +1,14 @@
 # SMSPlus GX — Sega Master System / Game Gear / SG-1000 / Colecovision
 # standalone dynamic core for Game & Watch Retro-Go SD.
 #
-#   make                  — build + pack → sms.bin
+#   make                  — build + pack → SmsPlusGX.bin
+#   make host             — Linux/macOS SDL binary (same sources)
+#   make host HOST_SDL=3  — same with SDL3
 #   make docker           — same build inside Docker (no host toolchain)
 #   make docker_shell     — interactive shell in the builder image
 #
-# Coleco BIOS is expected on the SD card at /bios/coleco/coleco.bin.
-# Verbose compiler lines: make V=
+# Coleco BIOS: objcopy .coleco_bios_data from the linked ELF → bios/coleco/coleco.bin
+# (shipped in the install zip). Verbose compiler lines: make V=
 
 #######################################
 # Project identity
@@ -53,6 +55,33 @@ CORE_LDSCRIPT := sms_core.ld
 CORE_EXTRA_SEGMENTS := itcm:core_itcm
 
 #######################################
+# SDK bridge overrides (optional)
+#######################################
+# The SDK bridge (gw_core_bridge.c) provides default implementations for
+# memcpy/memset/memmove/__aeabi_mem* and malloc/calloc/free/realloc.
+# Define these to exclude the SDK versions and supply your own:
+#
+#   GW_CORE_BRIDGE_DISABLE_SDK_MEMCPY — exclude memcpy only.
+#       Memmove stays routed through the SDK bridge (Doom/fastmem needs it).
+#
+#   GW_CORE_BRIDGE_DISABLE_SDK_MEMSET — exclude memset only.
+#
+#   GW_CORE_BRIDGE_DISABLE_SDK_MEMMOVE — exclude memmove too (requires your
+#       core to provide memmove).
+#
+#   GW_CORE_BRIDGE_DISABLE_SDK_MEMOPS — back-compat: exclude the full memops
+#       block (memcpy/memset/memmove + all __aeabi_mem* helpers).
+#
+#   GW_CORE_BRIDGE_DISABLE_SDK_MALLOC — exclude the malloc/calloc/free/
+#       realloc wrappers that forward to the firmware ABI heap. Use this when
+#       the core links its own allocator or needs a custom malloc/free path.
+#
+# To enable, add the define(s) to CORE_C_DEFS below, e.g.:
+#   CORE_C_DEFS += -DGW_CORE_BRIDGE_DISABLE_SDK_MEMCPY
+#   CORE_C_DEFS += -DGW_CORE_BRIDGE_DISABLE_SDK_MEMSET
+#   CORE_C_DEFS += -DGW_CORE_BRIDGE_DISABLE_SDK_MALLOC
+
+#######################################
 # Kind-specific compile defs + packing
 #######################################
 ifeq ($(PROJECT_KIND),core)
@@ -78,12 +107,31 @@ include $(GNW_CORE_SDK)/Makefile
 PACK_CORE := $(GNW_CORE_SDK)/tools/pack_core.py
 
 #######################################
+# Packed header version
+#######################################
+# gnw_core_meta_t only stores major.minor.patch (0..255).
+# CORE_VERSION is the full git describe string passed to the packer; it
+# extracts the leading vX.Y.Z (NOTAG / missing tags → 0.0.0).
+# Override: make CORE_VERSION=v1.2.3
+CORE_VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo NOTAG)
+
+#######################################
 # Pack — one binary, four launcher systems
 #######################################
-.PHONY: pack
+.PHONY: pack coleco_bios
 
-pack: $(TARGET_BIN)
-	$(V)$(ECHO) [ PACK CORE ] $(PACKED_BIN)
+COLECO_BIOS_BIN := bios/coleco/coleco.bin
+
+coleco_bios: $(COLECO_BIOS_BIN)
+
+# Same as the old firmware tree: extract the dedicated ELF section.
+$(COLECO_BIOS_BIN): $(TARGET_ELF)
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ BIOS ] $@
+	$(V)$(CP) -O binary --only-section=.coleco_bios_data $< $@
+
+pack: $(TARGET_BIN) $(COLECO_BIOS_BIN)
+	$(V)$(ECHO) [ PACK CORE ] $(PACKED_BIN) version=$(CORE_VERSION)
 	$(V)python3 $(PACK_CORE) \
 		--elf $(TARGET_ELF) --bin $(TARGET_BIN) \
 		--system name="Sega Master System",dirname=sms,pad_logo=src/assets/pad_sms.bmp,header_logo=src/assets/header_sms.bmp,ext=sms,parse=rom \
@@ -92,13 +140,14 @@ pack: $(TARGET_BIN)
 		--system name="Colecovision",dirname=col,pad_logo=src/assets/pad_col.bmp,header_logo=src/assets/header_col.bmp,ext=col,parse=rom \
 		--logo-invert \
 		--core-name "SMSPlus GX" \
-		--version 1.0.0 \
+		--version "$(CORE_VERSION)" \
 		--out $(PACKED_BIN)
 
 all: pack
 
 # Read-only helpers for CI / scripts (make print-PROJECT_KIND, etc.).
-.PHONY: print-PROJECT_KIND print-PACKED_BIN print-CORE_NAME print-DOCKER_IMAGE
+.PHONY: print-PROJECT_KIND print-PACKED_BIN print-CORE_NAME print-DOCKER_IMAGE \
+	print-TARGET_ELF print-TARGET_MAP print-CORE_VERSION
 print-PROJECT_KIND:
 	@echo $(PROJECT_KIND)
 print-PACKED_BIN:
@@ -107,9 +156,15 @@ print-CORE_NAME:
 	@echo $(CORE_NAME)
 print-DOCKER_IMAGE:
 	@echo $(DOCKER_IMAGE)
+print-TARGET_ELF:
+	@echo $(TARGET_ELF)
+print-TARGET_MAP:
+	@echo $(BUILD_DIR)/$(CORE_NAME)_core.map
+print-CORE_VERSION:
+	@echo $(CORE_VERSION)
 
 clean::
-	$(V)rm -f $(PACKED_BIN)
+	$(V)rm -f $(PACKED_BIN) $(COLECO_BIOS_BIN)
 
 #######################################
 # Docker (same image as firmware repo)
@@ -139,3 +194,8 @@ docker_pull:
 
 docker_shell:
 	$(DOCKER_RUN) bash
+
+#######################################
+# Host SDL (Linux / macOS)
+#######################################
+include host/Makefile.host
