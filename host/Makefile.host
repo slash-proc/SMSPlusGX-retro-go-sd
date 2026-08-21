@@ -32,8 +32,11 @@ HOST_PKG_CFLAGS := $(shell pkg-config --cflags $(HOST_SDL_PC) 2>/dev/null)
 HOST_PKG_LIBS   := $(shell pkg-config --libs $(HOST_SDL_PC) 2>/dev/null)
 # macOS sdl2.pc pulls -lSDL2main which wants SDL_main; we provide main() ourselves.
 HOST_PKG_LIBS   := $(filter-out -lSDL2main,$(HOST_PKG_LIBS))
+# Only warn when actually building the host target (print-* / pack must stay quiet).
+ifeq ($(filter host,$(MAKECMDGOALS)),host)
 ifeq ($(HOST_PKG_LIBS),)
 $(warning pkg-config $(HOST_SDL_PC) not found — host link may fail. Install SDL$(HOST_SDL) devel package.)
+endif
 endif
 
 HOST_INC_ROOT := $(GNW_CORE_SDK)/include

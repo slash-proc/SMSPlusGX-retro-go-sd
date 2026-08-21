@@ -3,7 +3,9 @@
 
 Reads PROJECT_KIND and PACKED_BIN from the root Makefile, builds:
   1. SD install zip:   <stem>-<tag>.zip       → cores/<packed.bin>
-                                             (+ bios/coleco/coleco.bin when present)
+                                             + bios/coleco/coleco.bin
+                                               (extracted from --elf
+                                               .coleco_bios_data)
   2. Debug symbols zip: <stem>-<tag>-debug.zip → ELF, map, README
 
 Extracts release notes from CHANGELOG.md for the requested tag.
@@ -18,6 +20,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import zipfile
@@ -30,6 +33,8 @@ DEFAULT_CHANGELOG = ROOT / "CHANGELOG.md"
 DEBUG_README = ROOT / "scripts" / "DEBUG_README.md"
 COLECO_BIOS_BIN = ROOT / "bios" / "coleco" / "coleco.bin"
 COLECO_BIOS_ZIP_PATH = "bios/coleco/coleco.bin"
+COLECO_BIOS_SECTION = ".coleco_bios_data"
+COLECO_BIOS_SIZE = 0x2000
 
 MAKE_VARS = (
     "PROJECT_KIND",
@@ -67,8 +72,12 @@ def read_make_vars() -> dict[str, str]:
         sys.stderr.write(proc.stderr or proc.stdout or "")
         raise SystemExit(f"failed to read Makefile variables from {MAKEFILE}")
 
+    # Host Makefile emits SDL pkg-config warnings even for print-* helpers.
     if proc.stderr:
-        sys.stderr.write(proc.stderr)
+        for line in proc.stderr.splitlines():
+            if "pkg-config" in line and "not found" in line:
+                continue
+            sys.stderr.write(line + "\n")
 
     values = [line for line in proc.stdout.splitlines() if line.strip()]
     # Defensive: if anything else leaked to stdout, keep the last N lines.
@@ -168,15 +177,107 @@ def build_release_notes(
     return "\n".join(lines) + "\n"
 
 
-def ensure_coleco_bios() -> Path:
-    """Expect bios/coleco/coleco.bin from `make coleco_bios` / `make pack`."""
-    if not COLECO_BIOS_BIN.is_file() or COLECO_BIOS_BIN.stat().st_size != 0x2000:
-        raise SystemExit(
-            f"Coleco BIOS missing or wrong size: {COLECO_BIOS_BIN}\n"
-            "Run `make pack` (or `make coleco_bios`) first — it extracts "
-            ".coleco_bios_data from the linked ELF via objcopy."
+def extract_elf32_le_section(elf_path: Path, section_name: str) -> bytes:
+    """Return the contents of a named section from an ELF32 little-endian file."""
+    data = elf_path.read_bytes()
+    if len(data) < 52 or data[:4] != b"\x7fELF":
+        raise SystemExit(f"not an ELF file: {elf_path}")
+    if data[4] != 1 or data[5] != 1:
+        raise SystemExit(f"expected ELF32 little-endian: {elf_path}")
+
+    (
+        _e_type,
+        _e_machine,
+        _e_version,
+        _e_entry,
+        _e_phoff,
+        e_shoff,
+        _e_flags,
+        _e_ehsize,
+        _e_phentsize,
+        _e_phnum,
+        e_shentsize,
+        e_shnum,
+        e_shstrndx,
+    ) = struct.unpack_from("<HHIIIIIHHHHHH", data, 16)
+
+    if e_shoff == 0 or e_shnum == 0 or e_shentsize < 40:
+        raise SystemExit(f"ELF has no section headers: {elf_path}")
+    if e_shstrndx >= e_shnum:
+        raise SystemExit(f"invalid section name table index in {elf_path}")
+
+    def shdr(index: int) -> tuple[int, int, int]:
+        off = e_shoff + index * e_shentsize
+        sh_name, _sh_type, _sh_flags, _sh_addr, sh_offset, sh_size = struct.unpack_from(
+            "<IIIIII", data, off
         )
-    return COLECO_BIOS_BIN
+        return sh_name, sh_offset, sh_size
+
+    _str_name, str_off, str_size = shdr(e_shstrndx)
+    if str_off + str_size > len(data):
+        raise SystemExit(f"corrupt section string table in {elf_path}")
+    strtab = data[str_off : str_off + str_size]
+
+    for index in range(e_shnum):
+        sh_name, sh_offset, sh_size = shdr(index)
+        if sh_name >= len(strtab):
+            continue
+        end = strtab.find(b"\0", sh_name)
+        name = strtab[sh_name : end if end >= 0 else None].decode("ascii", "replace")
+        if name != section_name:
+            continue
+        if sh_offset + sh_size > len(data):
+            raise SystemExit(f"section {section_name!r} out of range in {elf_path}")
+        return data[sh_offset : sh_offset + sh_size]
+
+    raise SystemExit(f"section {section_name!r} not found in {elf_path}")
+
+
+def find_objcopy() -> str | None:
+    for name in ("arm-none-eabi-objcopy", "objcopy"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
+def ensure_coleco_bios(*, elf: Path, out_path: Path) -> Path:
+    """Extract .coleco_bios_data from the linked ELF into out_path (8 KiB).
+
+    Prefers objcopy when available; falls back to a pure-Python ELF32 reader
+    so CI release runners without an ARM toolchain still work.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    objcopy = find_objcopy()
+    if objcopy:
+        proc = subprocess.run(
+            [
+                objcopy,
+                "-O",
+                "binary",
+                f"--only-section={COLECO_BIOS_SECTION}",
+                str(elf),
+                str(out_path),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if (
+            proc.returncode == 0
+            and out_path.is_file()
+            and out_path.stat().st_size == COLECO_BIOS_SIZE
+        ):
+            return out_path
+
+    blob = extract_elf32_le_section(elf, COLECO_BIOS_SECTION)
+    if len(blob) != COLECO_BIOS_SIZE:
+        raise SystemExit(
+            f"Coleco BIOS section size {len(blob)} != {COLECO_BIOS_SIZE} in {elf}"
+        )
+    out_path.write_bytes(blob)
+    return out_path
 
 
 def write_zip(archive_path: Path, members: list[tuple[Path, str]]) -> None:
@@ -232,10 +333,12 @@ def stage_release(
 
     zip_members: list[tuple[Path, str]] = [(sd_bin, f"{sd_dir}/{packed_name}")]
     if project_kind == "core":
-        bios = ensure_coleco_bios()
         bios_staged = out_dir / COLECO_BIOS_ZIP_PATH
-        bios_staged.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(bios, bios_staged)
+        ensure_coleco_bios(elf=elf, out_path=bios_staged)
+        # Keep a repo-local copy too (same as `make coleco_bios`).
+        if COLECO_BIOS_BIN.resolve() != bios_staged.resolve():
+            COLECO_BIOS_BIN.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(bios_staged, COLECO_BIOS_BIN)
         zip_members.append((bios_staged, COLECO_BIOS_ZIP_PATH))
 
     stem = Path(packed_name).stem
