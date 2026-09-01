@@ -296,6 +296,11 @@ void set_config()
 
   sms.gun_offset = 20; /* default offset */
 
+  /* Console implied by the ROM header (GG vs SMS). The built-in game DB
+   * describes SMS cartridges; without this, .gg dumps like Micro Machines
+   * get forced to SMS2 (wrong VDP/IO → purple screen / hardfault). */
+  uint8 header_console = sms.console;
+
   /* retrieve game settings from database */
   for (i = 0; i < GAME_DATABASE_CNT; i++)
   {
@@ -305,7 +310,8 @@ void set_config()
       sms.display = game_list[i].display;
       sms.territory = game_list[i].territory;
       sms.glasses_3d = game_list[i].glasses_3d;
-      sms.console =  game_list[i].console;
+      if (!(header_console & HWTYPE_GG) || (game_list[i].console & HWTYPE_GG))
+        sms.console = game_list[i].console;
       sms.device[0] = game_list[i].device;
       if (game_list[i].device != DEVICE_LIGHTGUN) sms.device[1] = game_list[i].device;
 
