@@ -28,10 +28,29 @@ else
 $(error HOST_SDL must be 2 or 3 (got '$(HOST_SDL)'))
 endif
 
-HOST_PKG_CFLAGS := $(shell pkg-config --cflags $(HOST_SDL_PC) 2>/dev/null)
-HOST_PKG_LIBS   := $(shell pkg-config --libs $(HOST_SDL_PC) 2>/dev/null)
+# Homebrew (macOS) installs *.pc under $(brew --prefix)/lib/pkgconfig; without
+# that on PKG_CONFIG_PATH, pkg-config misses SDL even when headers exist.
+BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+PKG_CONFIG_PATH_FOR_HOST := $(BREW_PREFIX)/lib/pkgconfig$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH),)
+
+HOST_PKG_CFLAGS := $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH_FOR_HOST)" pkg-config --cflags $(HOST_SDL_PC) 2>/dev/null)
+HOST_PKG_LIBS   := $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH_FOR_HOST)" pkg-config --libs $(HOST_SDL_PC) 2>/dev/null)
 # macOS sdl2.pc pulls -lSDL2main which wants SDL_main; we provide main() ourselves.
 HOST_PKG_LIBS   := $(filter-out -lSDL2main,$(HOST_PKG_LIBS))
+
+# Last-resort fallback when pkg-config is missing but brew paths exist.
+ifeq ($(HOST_PKG_LIBS),)
+ifneq ($(BREW_PREFIX),)
+ifeq ($(HOST_SDL),2)
+HOST_PKG_CFLAGS := -I$(BREW_PREFIX)/include -I$(BREW_PREFIX)/include/SDL2 -D_THREAD_SAFE
+HOST_PKG_LIBS := -L$(BREW_PREFIX)/lib -lSDL2
+else
+HOST_PKG_CFLAGS := -I$(BREW_PREFIX)/include
+HOST_PKG_LIBS := -L$(BREW_PREFIX)/lib -lSDL3
+endif
+endif
+endif
+
 # Only warn when actually building the host target (print-* / pack must stay quiet).
 ifeq ($(filter host,$(MAKECMDGOALS)),host)
 ifeq ($(HOST_PKG_LIBS),)
@@ -70,6 +89,7 @@ HOST_CFLAGS := -O2 -g -Wall -Wextra -std=c11 \
 
 HOST_SRCS := \
 	$(CORE_C_SOURCES) \
+	host/crc32.c \
 	host/host_main.c \
 	host/host_platform.c \
 	host/host_emu.c \

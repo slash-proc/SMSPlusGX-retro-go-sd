@@ -26,9 +26,14 @@
 
 #define SMS_WIDTH 256
 #define SMS_HEIGHT 192
+/* SMS2 extended VDP modes use up to 240 lines; render writes into fb_buffer. */
+#define SMS_FB_HEIGHT 240
 
 #define COL_WIDTH   272
 #define COL_HEIGHT  208
+
+#define FB_BUFFER_WIDTH  COL_WIDTH
+#define FB_BUFFER_HEIGHT SMS_FB_HEIGHT
 
 #define GG_WIDTH 160
 #define GG_HEIGHT 144
@@ -174,7 +179,8 @@ load_rom_from_flash(uint8_t emu_engine)
         option.console = 5; // Force SG1000
     }
     set_config();
-    printf("%s: OK. cart.size=%d, cart.crc=%#010lx\n", __func__, (int)cart.size, cart.crc);
+    printf("%s: OK. cart.size=%d, cart.crc=%#010x, mapper=%d\n",
+           __func__, (int)cart.size, (unsigned)cart.crc, (int)cart.mapper);
 
     if (sms.console == CONSOLE_COLECO)
     {
@@ -254,12 +260,77 @@ static void *Screenshot()
     return lcd_get_active_buffer();
 }
 
-static uint8_t fb_buffer[COL_WIDTH*COL_HEIGHT];
+static uint8_t fb_buffer[FB_BUFFER_WIDTH * FB_BUFFER_HEIGHT];
 
-#define CONV(_b0) ((0b11111000000000000000000000&_b0)>>10) | ((0b000001111110000000000&_b0)>>5) | ((0b0000000000011111&_b0));
+#define CONV(_b0) ((0b11111000000000000000000000&_b0)>>10) | ((0b000001111110000000000&_b0)>>5) | ((0b0000000000011111&_b0))
+
+/* Width produced by the 5:6 SMS horizontal scaler (must match blit_sms loops). */
+static int sms_blit56_out_width(int src_w)
+{
+    if (src_w <= 1)
+        return src_w > 0 ? 1 : 0;
+    return ((src_w - 2) / 5 + 1) * 6 + 1;
+}
+
+static void
+blit_clear_margins(uint16_t *framebuffer, int hpad, int vpad, int out_w, int out_h)
+{
+    const int right_pad = WIDTH - hpad - out_w;
+    const int bottom_pad = HEIGHT - vpad - out_h;
+
+    if (hpad == 0 && vpad == 0 && right_pad == 0 && bottom_pad == 0)
+        return;
+
+    for (int y = 0; y < vpad; y++)
+        memset(&framebuffer[y * WIDTH], 0, (size_t)WIDTH * sizeof(uint16_t));
+    for (int y = vpad + out_h; y < HEIGHT; y++)
+        memset(&framebuffer[y * WIDTH], 0, (size_t)WIDTH * sizeof(uint16_t));
+    for (int y = vpad; y < vpad + out_h; y++) {
+        if (hpad > 0)
+            memset(&framebuffer[y * WIDTH], 0, (size_t)hpad * sizeof(uint16_t));
+        if (right_pad > 0)
+            memset(&framebuffer[y * WIDTH + WIDTH - right_pad], 0, (size_t)right_pad * sizeof(uint16_t));
+    }
+}
+
+static void
+blit_scale_centered(bitmap_t *bmp, uint16_t *framebuffer)
+{
+    /* Uniform scale into 320×240, centered with letterboxing when needed. */
+    const int src_w = bmp->viewport.w;
+    const int src_h = bmp->viewport.h;
+    int scaled_w = WIDTH;
+    int scaled_h = (src_h * WIDTH) / src_w;
+    if (scaled_h > HEIGHT) {
+        scaled_h = HEIGHT;
+        scaled_w = (src_w * HEIGHT) / src_h;
+    }
+    const int hpad = (WIDTH - scaled_w) / 2;
+    const int vpad = (HEIGHT - scaled_h) / 2;
+
+    if (hpad > 0 || vpad > 0)
+        memset(framebuffer, 0, (size_t)WIDTH * HEIGHT * sizeof(uint16_t));
+
+    for (int dy = 0; dy < scaled_h; dy++) {
+        int sy = bmp->viewport.y + (dy * src_h) / scaled_h;
+        uint8_t *src_row = &bmp->data[sy * bmp->pitch];
+        uint16_t *dest_row = &framebuffer[(dy + vpad) * WIDTH + hpad];
+        for (int dx = 0; dx < scaled_w; dx++) {
+            int sx = bmp->viewport.x + (dx * src_w) / scaled_w;
+            dest_row[dx] = CONV(palette_spaced[src_row[sx] & 0x1f]);
+        }
+    }
+}
 
 static void
 blit_gg(bitmap_t *bmp, uint16_t *framebuffer) {	/* 160 x 144 -> 320 x 240 */
+    /* Integer 2××5/3 scaler fills the panel exactly for standard GG; fall back
+     * to centered letterbox for non-standard viewports (extra_gg, etc.). */
+    if (bmp->viewport.w != GG_WIDTH || bmp->viewport.h != GG_HEIGHT) {
+        blit_scale_centered(bmp, framebuffer);
+        return;
+    }
+
     int y_src = 0;
     int y_dst = 0;
     for (; y_src < bmp->viewport.h; y_src += 3, y_dst += 5) {
@@ -288,8 +359,19 @@ blit_gg(bitmap_t *bmp, uint16_t *framebuffer) {	/* 160 x 144 -> 320 x 240 */
 
 static void
 blit_sms(bitmap_t *bmp, uint16_t *framebuffer) {	/* 256 x 192 -> 320 x 230 */
-    const int hpad = (WIDTH - 320) / 2;
-    const int vpad = (HEIGHT - 230) / 2;
+    /* Micro Machines and others switch SMS2 VDP to 224/240-line modes; the
+     * fixed 5:6 scaler below assumes 192 lines and writes past the LCD FB. */
+    if (bmp->viewport.h != SMS_HEIGHT) {
+        blit_scale_centered(bmp, framebuffer);
+        return;
+    }
+
+    const int out_w = sms_blit56_out_width(bmp->viewport.w);
+    const int out_h = 230;
+    const int hpad = (WIDTH - out_w) / 2;
+    const int vpad = (HEIGHT - out_h) / 2;
+
+    blit_clear_margins(framebuffer, hpad, vpad, out_w, out_h);
 
     uint32_t block[6 * 5]; /* workspace: 5 rows, 6 pixels wide */
 
@@ -494,7 +576,7 @@ app_main_smsplusgx(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
         common_emu_state.pause_after_frames = 0;
     }
 
-    odroid_system_init(APPID_SMS, AUDIO_SAMPLE_RATE);
+    odroid_system_init(APPID_CORE, AUDIO_SAMPLE_RATE);
     odroid_system_emu_init(&LoadState, &SaveState, &Screenshot, NULL, NULL, NULL, NULL);
 
     system_reset_config();
@@ -523,7 +605,7 @@ app_main_smsplusgx(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
         bitmap.data   = fb_buffer;
     } else {
         bitmap.width = SMS_WIDTH;
-        bitmap.height = SMS_HEIGHT;
+        bitmap.height = SMS_FB_HEIGHT;
         bitmap.pitch = bitmap.width;
         bitmap.data = fb_buffer;
     }

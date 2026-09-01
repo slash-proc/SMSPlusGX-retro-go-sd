@@ -899,11 +899,3 @@ void boot_magic_set(uint32_t magic) { (void)magic; }
 void SystemClock_Config(uint8_t new_oc_level) { (void)new_oc_level; }
 void uptime_inc(void) {}
 uint32_t uptime_get(void) { return host_platform_ticks_ms(); }
-
-unsigned int crc32_le(unsigned int crc, unsigned char const *buf, unsigned int len)
-{
-    /* Minimal stub — not used by the template loop. */
-    (void)buf;
-    (void)len;
-    return crc;
-}
