@@ -67,7 +67,7 @@ void gw_core_bridge_init(void)
     /* Nothing to snapshot yet — see gw_core_bridge.h. */
 }
 
-/* Caprice (and other plain-C cores) call fputs(stderr, …) which expands to
+/* Plain-C cores call fputs(stderr, …) which expands to
  * _impure_ptr->_stderr. Alias the firmware's reent so stderr/stdout work.
  * Runs from .init_array before CORE_ENTRY (see gw_core_entry.S). */
 struct _reent;
@@ -160,6 +160,36 @@ double core_strtod(const char *nptr, char **endptr) { return gw_firmware_abi()->
  * remain and call into memcpy/memset/memmove).
  * Define GW_CORE_BRIDGE_DISABLE_SDK_MEMOPS to exclude the whole block. */
 #ifndef GW_CORE_BRIDGE_DISABLE_SDK_MEMOPS
+/* Byte loops written through a volatile destination. Plain byte loops here get
+ * rewritten by GCC's loop-distribution pass (-ftree-loop-distribute-patterns,
+ * on from -O2/-Os) into calls to memcpy/memset — that is, these very functions
+ * calling themselves with unchanged arguments, which recurses until the stack
+ * faults. It only bites when a copy/fill ends on a non-multiple-of-4 tail, so
+ * it hides until some caller passes a misaligned buffer.
+ *
+ * The Makefile also passes -fno-tree-loop-distribute-patterns for this file;
+ * the volatile keeps the source correct on its own if that flag is ever lost.
+ * memset's tail is at most 3 bytes; memcpy/memmove use these for their
+ * unaligned fallback too (already the slow path under -mno-unaligned-access). */
+static void gw_bytes_set(uint8_t *d, uint8_t b, size_t n)
+{
+    volatile uint8_t *vd = d;
+    while (n--) *vd++ = b;
+}
+
+static void gw_bytes_copy_fwd(uint8_t *d, const uint8_t *s, size_t n)
+{
+    volatile uint8_t *vd = d;
+    while (n--) *vd++ = *s++;
+}
+
+static void gw_bytes_copy_bwd(uint8_t *d, const uint8_t *s, size_t n)
+{
+    volatile uint8_t *vd = d + n;
+    s += n;
+    while (n--) *--vd = *--s;
+}
+
 #ifndef GW_CORE_BRIDGE_DISABLE_SDK_MEMCPY
 void *memcpy(void *dst, const void *src, size_t n)
 {
@@ -179,7 +209,7 @@ void *memcpy(void *dst, const void *src, size_t n)
             d += 4; s += 4; n -= 4;
         }
     }
-    while (n--) *d++ = *s++;
+    gw_bytes_copy_fwd(d, s, n);
     return dst;
 }
 #endif /* GW_CORE_BRIDGE_DISABLE_SDK_MEMCPY */
@@ -195,8 +225,7 @@ void *memmove(void *dst, const void *src, size_t n)
     if (d < s || d >= s + n)
         return memcpy(dst, src, n); /* non-overlapping (or dst before src): forward copy is safe */
 
-    d += n; s += n;
-    while (n--) *--d = *--s;
+    gw_bytes_copy_bwd(d, s, n);
     return dst;
 }
 #endif /* GW_CORE_BRIDGE_DISABLE_SDK_MEMMOVE */
@@ -217,7 +246,7 @@ void *memset(void *dst, int c, size_t n)
         }
         while (n >= 4) { *(uint32_t *)d = w; d += 4; n -= 4; }
     }
-    while (n--) *d++ = b;
+    gw_bytes_set(d, b, n);
     return dst;
 }
 #endif /* GW_CORE_BRIDGE_DISABLE_SDK_MEMSET */
@@ -234,9 +263,7 @@ void __aeabi_memcpy4(void *d, const void *s, size_t n)
     uint32_t *dw = (uint32_t *)d;
     const uint32_t *sw = (const uint32_t *)s;
     while (n >= 4) { *dw++ = *sw++; n -= 4; }
-    uint8_t *db = (uint8_t *)dw;
-    const uint8_t *sb = (const uint8_t *)sw;
-    while (n--) *db++ = *sb++;
+    gw_bytes_copy_fwd((uint8_t *)dw, (const uint8_t *)sw, n);
 }
 void __aeabi_memcpy8(void *d, const void *s, size_t n) { __aeabi_memcpy4(d, s, n); }
 void __aeabi_memmove(void *d, const void *s, size_t n) { memmove(d, s, n); }
@@ -248,8 +275,7 @@ void __aeabi_memset4(void *d, size_t n, int c)
     uint32_t *dw = (uint32_t *)d;
     uint32_t w = 0x01010101u * (uint32_t)(uint8_t)c;
     while (n >= 4) { *dw++ = w; n -= 4; }
-    uint8_t *db = (uint8_t *)dw;
-    while (n--) *db++ = (uint8_t)c;
+    gw_bytes_set((uint8_t *)dw, (uint8_t)c, n);
 }
 void __aeabi_memset8(void *d, size_t n, int c) { __aeabi_memset4(d, n, c); }
 void __aeabi_memclr(void *d, size_t n) { memset(d, 0, n); }
@@ -733,6 +759,19 @@ uint32_t core_dma2d_m2m_rgb565_start(uint32_t src, uint32_t dst, uint16_t width,
     return gw_firmware_abi()->dma2d_m2m_rgb565_start(src, dst, width, height);
 }
 
+uint32_t core_dma2d_m2m_rgb565_start_ex(uint32_t src, uint32_t dst, uint16_t width, uint16_t height,
+                                        uint16_t src_offset, uint16_t dst_offset)
+{
+    return gw_firmware_abi()->dma2d_m2m_rgb565_start_ex(src, dst, width, height,
+                                                        src_offset, dst_offset);
+}
+
+uint32_t core_dma2d_r2m_rgb565_start(uint32_t color, uint32_t dst, uint16_t width, uint16_t height,
+                                     uint16_t dst_offset)
+{
+    return gw_firmware_abi()->dma2d_r2m_rgb565_start(color, dst, width, height, dst_offset);
+}
+
 uint32_t core_dma2d_poll(uint32_t timeout_ms)
 {
     return gw_firmware_abi()->dma2d_poll(timeout_ms);
@@ -1127,11 +1166,6 @@ uint8_t *core_odroid_overlay_cache_file_in_flash_relocate(
 {
     return gw_firmware_abi()->odroid_overlay_cache_file_in_flash_relocate(
         file_path, file_size_p, byte_swap, relocate_cb);
-}
-
-void core_draw_error_screen(const char *main_line, const char *line_1, const char *line_2)
-{
-    gw_firmware_abi()->draw_error_screen(main_line, line_1, line_2);
 }
 
 /* ====================================================================

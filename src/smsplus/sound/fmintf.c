@@ -73,6 +73,20 @@ void FM_SetContext(uint8 *data)
 
   memcpy(&fm_context, data, sizeof(FM_Context));
 
+  /* Lazy FM: re-enable synthesis when a save carries YM2413 register state. */
+  if (!sms.use_fm && snd.fm_which == SND_EMU2413)
+  {
+    int i;
+    for (i = 0; i < 0x40; i++)
+    {
+      if (fm_context.reg[i])
+      {
+        sms.use_fm = 1;
+        break;
+      }
+    }
+  }
+
   /* If we are loading a save state, we want to update the YM2413 context
      but not actually write to the current YM2413 emulator. */
   if (!snd.enabled || !sms.use_fm)

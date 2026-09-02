@@ -21,7 +21,6 @@ INC=(
   -I"$FW/Core/Src/porting/core_common"
   -I"$FW/Core/Src/porting/lib"
   -I"$FW/Core/Src/porting/lib/FatFs"
-  -I"$FW/retro-go-stm32/components/odroid"
   -I"$FW/Drivers/STM32H7xx_HAL_Driver/Inc"
   -I"$FW/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy"
   -I"$FW/Drivers/CMSIS/Device/ST/STM32H7xx/Include"
@@ -52,9 +51,9 @@ while IFS= read -r h; do
 done <<< "$DEPS"
 
 for extra in \
+  Core/Inc/retro-go/appid.h \
   Core/Inc/retro-go/gnw_core_meta.h \
   Core/Inc/retro-go/gwhb.h \
-  Core/Inc/retro-go/appid.h \
   Core/Inc/gw_malloc.h \
   Core/Inc/heap.hpp
 do

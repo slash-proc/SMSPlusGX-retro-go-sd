@@ -264,12 +264,16 @@ int fmunit_detect_r(void)
 
 void fmunit_detect_w(int data)
 {
-  if(!snd.enabled || !sms.use_fm) return;
+  if (!snd.enabled)
+    return;
   sms.fm_detect = data;
 }
 
 void fmunit_write(int offset, int data)
 {
-  if(!snd.enabled || !sms.use_fm) return;
+  if (!snd.enabled)
+    return;
+  if (!sms.use_fm)
+    sms.use_fm = 1;
   FM_Write(offset, data);
 }

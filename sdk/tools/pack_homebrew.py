@@ -47,7 +47,8 @@ assert META_STRUCT_SIZE == 96, META_STRUCT_SIZE
 def parse_version(spec: str) -> tuple[int, int, int]:
     """Parse X.Y.Z / git describe / NOTAG into (major, minor, patch).
 
-    See pack_core.parse_version — header only stores three uint8 fields.
+    Only the leading X.Y.Z is stored in the header (3 bytes); the full
+    describe string is for build logs / Makefile only. NOTAG / empty → 0.0.0.
     """
     s = spec.strip()
     if not s or s.upper() == "NOTAG":
@@ -182,11 +183,8 @@ def main() -> None:
     ap.add_argument("--bin", type=Path, required=True,
                     help="flat RAM_EMU payload (objcopy -O binary)")
     ap.add_argument("--name", required=True, help="display name (max 31 bytes)")
-    ap.add_argument(
-        "--version",
-        default="1.0.0",
-        help="X.Y.Z, git describe (vX.Y.Z…), or NOTAG → 0.0.0 (default: %(default)s)",
-    )
+    ap.add_argument("--version", default="1.0.0",
+                    help="X.Y.Z, git describe (vX.Y.Z…), or NOTAG → 0.0.0 (default: %(default)s)")
     ap.add_argument("--cover", type=Path, default=None,
                     help="optional JPEG cover (<= 10 KiB)")
     ap.add_argument("--flags", type=lambda s: int(s, 0), default=0)
@@ -265,7 +263,7 @@ def main() -> None:
     args.out.write_bytes(envelope)
 
     print(f"pack_homebrew: wrote {args.out} ({len(envelope)} bytes)")
-    print(f"  name={args.name!r} version={ver_maj}.{ver_min}.{ver_pat} (from {args.version!r})")
+    print(f"  name={args.name!r} version={ver_maj}.{ver_min}.{ver_pat}")
     print(f"  code={code_size}B bss={bss_size}B cover={cover_size}B")
     print(
         f"  required_abi_version={required_abi_version} "

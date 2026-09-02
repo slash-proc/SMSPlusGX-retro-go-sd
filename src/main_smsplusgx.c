@@ -41,8 +41,6 @@
 #define PIXEL_MASK 0x1F
 #define PAL_SHIFT_MASK 0x80
 
-#define AUDIO_BUFFER_LENGTH_SMS (AUDIO_SAMPLE_RATE / 60)
-
 static uint16_t palette[32];
 static uint32_t palette_spaced[32];
 
@@ -264,35 +262,6 @@ static uint8_t fb_buffer[FB_BUFFER_WIDTH * FB_BUFFER_HEIGHT];
 
 #define CONV(_b0) ((0b11111000000000000000000000&_b0)>>10) | ((0b000001111110000000000&_b0)>>5) | ((0b0000000000011111&_b0))
 
-/* Width produced by the 5:6 SMS horizontal scaler (must match blit_sms loops). */
-static int sms_blit56_out_width(int src_w)
-{
-    if (src_w <= 1)
-        return src_w > 0 ? 1 : 0;
-    return ((src_w - 2) / 5 + 1) * 6 + 1;
-}
-
-static void
-blit_clear_margins(uint16_t *framebuffer, int hpad, int vpad, int out_w, int out_h)
-{
-    const int right_pad = WIDTH - hpad - out_w;
-    const int bottom_pad = HEIGHT - vpad - out_h;
-
-    if (hpad == 0 && vpad == 0 && right_pad == 0 && bottom_pad == 0)
-        return;
-
-    for (int y = 0; y < vpad; y++)
-        memset(&framebuffer[y * WIDTH], 0, (size_t)WIDTH * sizeof(uint16_t));
-    for (int y = vpad + out_h; y < HEIGHT; y++)
-        memset(&framebuffer[y * WIDTH], 0, (size_t)WIDTH * sizeof(uint16_t));
-    for (int y = vpad; y < vpad + out_h; y++) {
-        if (hpad > 0)
-            memset(&framebuffer[y * WIDTH], 0, (size_t)hpad * sizeof(uint16_t));
-        if (right_pad > 0)
-            memset(&framebuffer[y * WIDTH + WIDTH - right_pad], 0, (size_t)right_pad * sizeof(uint16_t));
-    }
-}
-
 static void
 blit_scale_centered(bitmap_t *bmp, uint16_t *framebuffer)
 {
@@ -358,100 +327,50 @@ blit_gg(bitmap_t *bmp, uint16_t *framebuffer) {	/* 160 x 144 -> 320 x 240 */
 }
 
 static void
-blit_sms(bitmap_t *bmp, uint16_t *framebuffer) {	/* 256 x 192 -> 320 x 230 */
-    /* Micro Machines and others switch SMS2 VDP to 224/240-line modes; the
-     * fixed 5:6 scaler below assumes 192 lines and writes past the LCD FB. */
-    if (bmp->viewport.h != SMS_HEIGHT) {
+blit_sms(bitmap_t *bmp, uint16_t *framebuffer)
+{
+    /* 256×192 → 320×240 via 4:5 integer blocks (same ratio both axes). */
+    if (bmp->viewport.w != SMS_WIDTH || bmp->viewport.h != SMS_HEIGHT) {
         blit_scale_centered(bmp, framebuffer);
         return;
     }
 
-    const int out_w = sms_blit56_out_width(bmp->viewport.w);
-    const int out_h = 230;
-    const int hpad = (WIDTH - out_w) / 2;
-    const int vpad = (HEIGHT - out_h) / 2;
+    uint32_t block[5 * 5];
 
-    blit_clear_margins(framebuffer, hpad, vpad, out_w, out_h);
-
-    uint32_t block[6 * 5]; /* workspace: 5 rows, 6 pixels wide */
-
-    int y_src = 1;         /* 1st and last row of 192 will not be scaled */
-    int y_dst = 1 + vpad;  /* the remaining 190 are scaled */
-    for (; y_src < bmp->viewport.h - 1; y_src += 5, y_dst += 6) {
+    int y_src = 0;
+    int y_dst = 0;
+    for (; y_src < bmp->viewport.h; y_src += 4, y_dst += 5) {
         int x_src = 0;
-        int x_dst = hpad;
-        for (; x_src < bmp->viewport.w - 1; x_src += 5, x_dst += 6) {
-            for (int y = 0; y < 5; y++) {
-                uint8_t *src_row = &bmp->data[(y_src + y + bmp->viewport.y) * bmp->pitch];
+        int x_dst = 0;
+        for (; x_src < bmp->viewport.w; x_src += 4, x_dst += 5) {
+            for (int y = 0; y < 4; y++) {
+                uint8_t *src_row = &bmp->data[(y_src + y + bmp->viewport.y) * bmp->pitch
+                                               + bmp->viewport.x];
                 uint32_t b0 = palette_spaced[src_row[x_src + 0] & 0x1f];
                 uint32_t b1 = palette_spaced[src_row[x_src + 1] & 0x1f];
                 uint32_t b2 = palette_spaced[src_row[x_src + 2] & 0x1f];
                 uint32_t b3 = palette_spaced[src_row[x_src + 3] & 0x1f];
-                uint32_t b4 = palette_spaced[src_row[x_src + 4] & 0x1f];
 
-                block[(y * 6) + 0] = b0;
-                block[(y * 6) + 1] = (b0+b1+b1+b1)>>2;
-                block[(y * 6) + 2] = (b1+b2)>>1;
-                block[(y * 6) + 3] = (b2+b3)>>1;
-                block[(y * 6) + 4] = (b3+b3+b3+b4)>>2;
-                block[(y * 6) + 5] = b4;
+                block[(y * 5) + 0] = b0;
+                block[(y * 5) + 1] = (b0 + b1 + b1 + b1) >> 2;
+                block[(y * 5) + 2] = (b1 + b2) >> 1;
+                block[(y * 5) + 3] = (b2 + b3 + b3 + b3) >> 2;
+                block[(y * 5) + 4] = b3;
             }
 
-            for (int x = 0; x < 6; x++) {
-                uint32_t b0 = block[(0 * 6) + x];
-                uint32_t b1 = block[(1 * 6) + x];
-                uint32_t b2 = block[(2 * 6) + x];
-                uint32_t b3 = block[(3 * 6) + x];
-                uint32_t b4 = block[(4 * 6) + x];
+            for (int x = 0; x < 5; x++) {
+                uint32_t b0 = block[(0 * 5) + x];
+                uint32_t b1 = block[(1 * 5) + x];
+                uint32_t b2 = block[(2 * 5) + x];
+                uint32_t b3 = block[(3 * 5) + x];
 
                 framebuffer[((y_dst + 0) * WIDTH) + x + x_dst] = CONV(b0);
-                framebuffer[((y_dst + 1) * WIDTH) + x + x_dst] = CONV((b0+b1+b1+b1)>>2);
-                framebuffer[((y_dst + 2) * WIDTH) + x + x_dst] = CONV((b1+b2)>>1);
-                framebuffer[((y_dst + 3) * WIDTH) + x + x_dst] = CONV((b2+b3)>>1);
-                framebuffer[((y_dst + 4) * WIDTH) + x + x_dst] = CONV((b3+b3+b3+b4)>>2);
-                framebuffer[((y_dst + 5) * WIDTH) + x + x_dst] = CONV(b4);
+                framebuffer[((y_dst + 1) * WIDTH) + x + x_dst] = CONV((b0 + b1 + b1 + b1) >> 2);
+                framebuffer[((y_dst + 2) * WIDTH) + x + x_dst] = CONV((b1 + b2) >> 1);
+                framebuffer[((y_dst + 3) * WIDTH) + x + x_dst] = CONV((b2 + b3 + b3 + b3) >> 2);
+                framebuffer[((y_dst + 4) * WIDTH) + x + x_dst] = CONV(b3);
             }
         }
-
-        /* Last column, x_src = 255 */
-        uint8_t *src_col = &bmp->data[(y_src + bmp->viewport.y) * bmp->pitch + x_src];
-        uint32_t b0 = palette_spaced[src_col[bmp->pitch * 0] & 0x1f];
-        uint32_t b1 = palette_spaced[src_col[bmp->pitch * 1] & 0x1f];
-        uint32_t b2 = palette_spaced[src_col[bmp->pitch * 2] & 0x1f];
-        uint32_t b3 = palette_spaced[src_col[bmp->pitch * 3] & 0x1f];
-        uint32_t b4 = palette_spaced[src_col[bmp->pitch * 4] & 0x1f];
-
-        framebuffer[((y_dst + 0) * WIDTH) + x_dst] = CONV(b0);
-        framebuffer[((y_dst + 1) * WIDTH) + x_dst] = CONV((b0+b1+b1+b1)>>2);
-        framebuffer[((y_dst + 2) * WIDTH) + x_dst] = CONV((b1+b2)>>1);
-        framebuffer[((y_dst + 3) * WIDTH) + x_dst] = CONV((b2+b3)>>1);
-        framebuffer[((y_dst + 4) * WIDTH) + x_dst] = CONV((b3+b3+b3+b4)>>2);
-        framebuffer[((y_dst + 5) * WIDTH) + x_dst] = CONV(b4);
-    }
-
-    y_src = 0;		   /* First & last row */
-    y_dst = 0 + vpad;
-    for (; y_src < bmp->viewport.h; y_src += 191, y_dst += 228) {
-        uint8_t *src_row = &bmp->data[(y_src + bmp->viewport.y) * bmp->pitch];
-        uint16_t *dest_row = &framebuffer[WIDTH * y_dst];
-        int x_src = 0;
-        int x_dst = hpad;
-        for (; x_src < bmp->viewport.w - 1; x_src += 5, x_dst += 6) {
-            uint32_t b0 = palette_spaced[src_row[x_src + 0] & 0x1f];
-            uint32_t b1 = palette_spaced[src_row[x_src + 1] & 0x1f];
-            uint32_t b2 = palette_spaced[src_row[x_src + 2] & 0x1f];
-            uint32_t b3 = palette_spaced[src_row[x_src + 3] & 0x1f];
-            uint32_t b4 = palette_spaced[src_row[x_src + 4] & 0x1f];
-
-            dest_row[x_dst + 0]   = CONV(b0);
-            dest_row[x_dst + 1] = CONV((b0+b1+b1+b1)>>2);
-            dest_row[x_dst + 2] = CONV((b1+b2)>>1);
-            dest_row[x_dst + 3] = CONV((b2+b3)>>1);
-            dest_row[x_dst + 4] = CONV((b3+b3+b3+b4)>>2);
-            dest_row[x_dst + 5] = CONV(b4);
-        }
-        /* Last column, x_src = 255 */
-        dest_row[x_dst] = CONV(palette_spaced[src_row[x_src] & 0x1f]);
     }
 }
 
@@ -509,7 +428,9 @@ static void sms_draw_frame()
   }
 
   blit();
-  common_ingame_overlay();
+//  if (lcd_is_swap_pending())
+//      lcd_sleep_while_swap_pending();
+//  lcd_wait_for_vblank();
   lcd_swap();
 }
 
@@ -586,17 +507,10 @@ app_main_smsplusgx(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
         return 0;
     }
 
-    /* Mark III FM Sound Unit / Japanese SMS built-in YM2413.
-     * Games that support FM usually require TERRITORY_DOMESTIC (set from
-     * the ROM header / game DB). Enable the chip for all SMS modes so the
-     * detect ports respond; GG / SG / Coleco never use it. */
-    if (IS_SMS) {
-        option.fm = SND_EMU2413;
-        sms.use_fm = 1;
-    } else {
-        option.fm = SND_NONE;
-        sms.use_fm = 0;
-    }
+    /* Lazy FM: init EMU2413 for SMS so games can probe port $F2, but keep
+     * sms.use_fm off until the title writes $F0/$F1 (FM_Update is costly). */
+    sms.use_fm = 0;
+    option.fm = IS_SMS ? SND_EMU2413 : SND_NONE;
 
     if (sms.console == CONSOLE_COLECO) {
         bitmap.width  = COL_WIDTH;
@@ -614,22 +528,24 @@ app_main_smsplusgx(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     option.overscan = 0;
     option.extra_gg = 0;
 
+    {
+        int fps = (sms.display == DISPLAY_NTSC) ? FPS_NTSC : FPS_PAL;
+        lcd_set_refresh_rate((uint32_t)fps);
+    }
+
     system_init2();
     system_reset();
 
-    audio_start_playing(AUDIO_BUFFER_LENGTH_SMS);
+    {
+        int fps = (sms.display == DISPLAY_NTSC) ? FPS_NTSC : FPS_PAL;
+        audio_start_playing((uint16_t)(AUDIO_SAMPLE_RATE / fps));
+        common_emu_state.frame_time_10us = (uint16_t)(100000 / fps + 0.5f);
+    }
 
     consoleIsSMS = sms.console == CONSOLE_SMS || sms.console == CONSOLE_SMS2;
     consoleIsGG  = sms.console == CONSOLE_GG || sms.console == CONSOLE_GGMS;
     consoleIsCOL = sms.console == CONSOLE_COLECO;
     consoleIsSG  = sms.console == CONSOLE_SG1000;
-
-    if (sms.display == DISPLAY_NTSC) {
-        common_emu_state.frame_time_10us = (uint16_t)(100000 / FPS_NTSC + 0.5f);
-    }
-    else {
-        common_emu_state.frame_time_10us = (uint16_t)(100000 / FPS_PAL + 0.5f);
-    }
 
     if (load_state) {
         odroid_system_emu_load_state(save_slot);

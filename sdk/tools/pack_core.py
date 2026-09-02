@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Package a standalone "core" build (see cores/_template/, cores/wsv/,
-cores/pce/) into the CORE-header .bin format the launcher discovers at boot
+Package a standalone "core" build (see cores/_template/, cores/wsv/, …) into the CORE-header .bin format the launcher discovers at boot
 (emulators_scan_cores() / gnw_core_probe() in Core/Src/retro-go/rg_emulators.c).
 
 File layout produced (all integers little-endian):
@@ -55,13 +54,11 @@ Usage — single-system, single-segment core (see cores/wsv/Makefile):
         --version 1.0.0 \\
         --out ../wsv.bin
 
-`--version X.Y.Z` / git describe / NOTAG (optional leading `v`, default 1.0.0)
-and `--core-name` (default: --out stem) are stored in `gnw_core_meta_t` and
-shown in the in-game pause → Info dialog (name, version, path, file date).
-Describe strings like `v1.2.3-5-gabcdef-dirty` store only the leading
-`1.2.3`; `NOTAG` stores `0.0.0`.
+`--version X.Y.Z` (optional leading `v`, default 1.0.0) and `--core-name`
+(default: --out stem) are stored in `gnw_core_meta_t` and shown in the
+in-game pause → Info dialog (name, version, path, file date).
 
-Usage — multi-system, multi-segment core (see cores/pce/Makefile):
+Usage — multi-system, multi-segment core (ITCM + multiple --system entries):
 
     tools/pack_core.py \\
         --elf build/pce_core.elf --bin build/pce_core.bin \\
@@ -417,7 +414,7 @@ def parse_segment_arg(spec):
 
 
 # Optional extra segments discovered from ELF symbols when a custom
-# linker script defines them (see cores/pce/pce_core.ld, cores/gba/…).
+# linker script defines them (see cores/msx/msx_core.ld for a multi-region example).
 # If the triple is absent, packing is a no-op for that region.
 # AHB is intentionally omitted — AHB SRAM is the firmware malloc heap.
 AUTO_EXTRA_SEGMENTS = (
@@ -552,8 +549,9 @@ def main():
 
     ap.add_argument("--flags", type=lambda s: int(s, 0), default=0)
     ap.add_argument("--version", default="1.0.0",
-                     help="core version: X.Y.Z, git describe (vX.Y.Z[-N-gHEX][-dirty]), "
-                          "or NOTAG (stores 0.0.0); optional leading 'v'")
+                     help="X.Y.Z, git describe (vX.Y.Z…), or NOTAG → 0.0.0 "
+                          "(optional leading 'v'; stored as 3 bytes in "
+                          "gnw_core_meta_t, default: %(default)s)")
     ap.add_argument("--core-name", default=None,
                      help="short core pack name stored in gnw_core_meta_t "
                           f"(max {CORE_NAME_MAX} chars). Default: --out stem "
@@ -719,7 +717,7 @@ def main():
     args.out.write_bytes(out_bytes)
 
     print(f"pack_core: {args.out} ({len(out_bytes)} bytes)")
-    print(f"  core_name={core_name!r} version=v{version_major}.{version_minor}.{version_patch} (from {args.version!r})")
+    print(f"  core_name={core_name!r} version=v{version_major}.{version_minor}.{version_patch}")
     print(f"  required_abi_version={required_abi_version} required_abi_min_size={required_abi_min_size}")
     for i, s in enumerate(systems):
         print(f"  system[{i}]: name={s.name!r} dirname={s.dirname!r} extensions={s.extensions!r} parse_type={s.parse_type}")

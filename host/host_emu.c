@@ -315,6 +315,16 @@ void lcd_wait_for_vblank(void)
     host_platform_delay_ms(1);
 }
 
+uint32_t lcd_is_swap_pending(void)
+{
+    return 0;
+}
+
+bool lcd_sleep_while_swap_pending(void)
+{
+    return false;
+}
+
 void lcd_set_refresh_rate(uint32_t frequency)
 {
     if (frequency)
