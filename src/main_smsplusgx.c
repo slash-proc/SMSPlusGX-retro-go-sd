@@ -291,45 +291,130 @@ blit_scale_centered(bitmap_t *bmp, uint16_t *framebuffer)
     }
 }
 
+/* 1:1 copy centered in 320×240 (SCALING_OFF). */
 static void
-blit_gg(bitmap_t *bmp, uint16_t *framebuffer) {	/* 160 x 144 -> 320 x 240 */
-    /* Integer 2××5/3 scaler fills the panel exactly for standard GG; fall back
-     * to centered letterbox for non-standard viewports (extra_gg, etc.). */
-    if (bmp->viewport.w != GG_WIDTH || bmp->viewport.h != GG_HEIGHT) {
+blit_normal(bitmap_t *bmp, uint16_t *framebuffer)
+{
+    const int src_w = bmp->viewport.w;
+    const int src_h = bmp->viewport.h;
+    const int hpad = (WIDTH - src_w) / 2;
+    const int vpad = (HEIGHT - src_h) / 2;
+
+    if (src_w > WIDTH || src_h > HEIGHT) {
         blit_scale_centered(bmp, framebuffer);
         return;
     }
 
-    int y_src = 0;
-    int y_dst = 0;
-    for (; y_src < bmp->viewport.h; y_src += 3, y_dst += 5) {
-        int x_src = 0;
-        int x_dst = 0;
-        for (; x_src < bmp->viewport.w; x_src += 1, x_dst += 2) {
-            uint8_t *src_col = &bmp->data[(y_src + bmp->viewport.y) * bmp->pitch + x_src + bmp->viewport.x];
-            uint32_t b0 = palette_spaced[src_col[bmp->pitch * 0] & 0x1f];
-            uint32_t b1 = palette_spaced[src_col[bmp->pitch * 1] & 0x1f];
-            uint32_t b2 = palette_spaced[src_col[bmp->pitch * 2] & 0x1f];
-
-            framebuffer[((y_dst + 0) * WIDTH) + x_dst] = CONV(b0);
-            framebuffer[((y_dst + 1) * WIDTH) + x_dst] = CONV((b0+b1)>>1);
-            framebuffer[((y_dst + 2) * WIDTH) + x_dst] = CONV(b1);
-            framebuffer[((y_dst + 3) * WIDTH) + x_dst] = CONV((b1+b2)>>1);
-            framebuffer[((y_dst + 4) * WIDTH) + x_dst] = CONV(b2);
-
-            framebuffer[((y_dst + 0) * WIDTH) + x_dst + 1] = CONV(b0);
-            framebuffer[((y_dst + 1) * WIDTH) + x_dst + 1] = CONV((b0+b1)>>1);
-            framebuffer[((y_dst + 2) * WIDTH) + x_dst + 1] = CONV(b1);
-            framebuffer[((y_dst + 3) * WIDTH) + x_dst + 1] = CONV((b1+b2)>>1);
-            framebuffer[((y_dst + 4) * WIDTH) + x_dst + 1] = CONV(b2);
-        }
+    memset(framebuffer, 0, (size_t)WIDTH * HEIGHT * sizeof(uint16_t));
+    for (int y = 0; y < src_h; y++) {
+        uint8_t *src_row = &bmp->data[(y + bmp->viewport.y) * bmp->pitch + bmp->viewport.x];
+        uint16_t *dest_row = &framebuffer[(y + vpad) * WIDTH + hpad];
+        for (int x = 0; x < src_w; x++)
+            dest_row[x] = CONV(palette_spaced[src_row[x] & 0x1f]);
     }
 }
 
+/* Classic SMS 5:6 scaler → 320×230 with thin letterbox (SCALING_FIT). */
 static void
-blit_sms(bitmap_t *bmp, uint16_t *framebuffer)
+blit_sms_fit(bitmap_t *bmp, uint16_t *framebuffer)
 {
-    /* 256×192 → 320×240 via 4:5 integer blocks (same ratio both axes). */
+    if (bmp->viewport.w != SMS_WIDTH || bmp->viewport.h != SMS_HEIGHT) {
+        blit_scale_centered(bmp, framebuffer);
+        return;
+    }
+
+    /* 5:6 of 256px → 307 wide ((255/5)*6 + last col), not full 320. */
+    const int out_w = ((SMS_WIDTH - 2) / 5 + 1) * 6 + 1;
+    const int hpad = (WIDTH - out_w) / 2;
+    const int vpad = (HEIGHT - 230) / 2;
+    uint32_t block[6 * 5];
+
+    memset(framebuffer, 0, (size_t)WIDTH * HEIGHT * sizeof(uint16_t));
+
+    int y_src = 1;
+    int y_dst = 1 + vpad;
+    for (; y_src < bmp->viewport.h - 1; y_src += 5, y_dst += 6) {
+        int x_src = 0;
+        int x_dst = hpad;
+        for (; x_src < bmp->viewport.w - 1; x_src += 5, x_dst += 6) {
+            for (int y = 0; y < 5; y++) {
+                uint8_t *src_row = &bmp->data[(y_src + y + bmp->viewport.y) * bmp->pitch
+                                               + bmp->viewport.x];
+                uint32_t b0 = palette_spaced[src_row[x_src + 0] & 0x1f];
+                uint32_t b1 = palette_spaced[src_row[x_src + 1] & 0x1f];
+                uint32_t b2 = palette_spaced[src_row[x_src + 2] & 0x1f];
+                uint32_t b3 = palette_spaced[src_row[x_src + 3] & 0x1f];
+                uint32_t b4 = palette_spaced[src_row[x_src + 4] & 0x1f];
+
+                block[(y * 6) + 0] = b0;
+                block[(y * 6) + 1] = (b0 + b1 + b1 + b1) >> 2;
+                block[(y * 6) + 2] = (b1 + b2) >> 1;
+                block[(y * 6) + 3] = (b2 + b3) >> 1;
+                block[(y * 6) + 4] = (b3 + b3 + b3 + b4) >> 2;
+                block[(y * 6) + 5] = b4;
+            }
+
+            for (int x = 0; x < 6; x++) {
+                uint32_t b0 = block[(0 * 6) + x];
+                uint32_t b1 = block[(1 * 6) + x];
+                uint32_t b2 = block[(2 * 6) + x];
+                uint32_t b3 = block[(3 * 6) + x];
+                uint32_t b4 = block[(4 * 6) + x];
+
+                framebuffer[((y_dst + 0) * WIDTH) + x + x_dst] = CONV(b0);
+                framebuffer[((y_dst + 1) * WIDTH) + x + x_dst] = CONV((b0 + b1 + b1 + b1) >> 2);
+                framebuffer[((y_dst + 2) * WIDTH) + x + x_dst] = CONV((b1 + b2) >> 1);
+                framebuffer[((y_dst + 3) * WIDTH) + x + x_dst] = CONV((b2 + b3) >> 1);
+                framebuffer[((y_dst + 4) * WIDTH) + x + x_dst] = CONV((b3 + b3 + b3 + b4) >> 2);
+                framebuffer[((y_dst + 5) * WIDTH) + x + x_dst] = CONV(b4);
+            }
+        }
+
+        uint8_t *src_col = &bmp->data[(y_src + bmp->viewport.y) * bmp->pitch
+                                       + bmp->viewport.x + x_src];
+        uint32_t b0 = palette_spaced[src_col[bmp->pitch * 0] & 0x1f];
+        uint32_t b1 = palette_spaced[src_col[bmp->pitch * 1] & 0x1f];
+        uint32_t b2 = palette_spaced[src_col[bmp->pitch * 2] & 0x1f];
+        uint32_t b3 = palette_spaced[src_col[bmp->pitch * 3] & 0x1f];
+        uint32_t b4 = palette_spaced[src_col[bmp->pitch * 4] & 0x1f];
+
+        framebuffer[((y_dst + 0) * WIDTH) + x_dst] = CONV(b0);
+        framebuffer[((y_dst + 1) * WIDTH) + x_dst] = CONV((b0 + b1 + b1 + b1) >> 2);
+        framebuffer[((y_dst + 2) * WIDTH) + x_dst] = CONV((b1 + b2) >> 1);
+        framebuffer[((y_dst + 3) * WIDTH) + x_dst] = CONV((b2 + b3) >> 1);
+        framebuffer[((y_dst + 4) * WIDTH) + x_dst] = CONV((b3 + b3 + b3 + b4) >> 2);
+        framebuffer[((y_dst + 5) * WIDTH) + x_dst] = CONV(b4);
+    }
+
+    y_src = 0;
+    y_dst = 0 + vpad;
+    for (; y_src < bmp->viewport.h; y_src += 191, y_dst += 228) {
+        uint8_t *src_row = &bmp->data[(y_src + bmp->viewport.y) * bmp->pitch + bmp->viewport.x];
+        uint16_t *dest_row = &framebuffer[WIDTH * y_dst];
+        int x_src = 0;
+        int x_dst = hpad;
+        for (; x_src < bmp->viewport.w - 1; x_src += 5, x_dst += 6) {
+            uint32_t b0 = palette_spaced[src_row[x_src + 0] & 0x1f];
+            uint32_t b1 = palette_spaced[src_row[x_src + 1] & 0x1f];
+            uint32_t b2 = palette_spaced[src_row[x_src + 2] & 0x1f];
+            uint32_t b3 = palette_spaced[src_row[x_src + 3] & 0x1f];
+            uint32_t b4 = palette_spaced[src_row[x_src + 4] & 0x1f];
+
+            dest_row[x_dst + 0] = CONV(b0);
+            dest_row[x_dst + 1] = CONV((b0 + b1 + b1 + b1) >> 2);
+            dest_row[x_dst + 2] = CONV((b1 + b2) >> 1);
+            dest_row[x_dst + 3] = CONV((b2 + b3) >> 1);
+            dest_row[x_dst + 4] = CONV((b3 + b3 + b3 + b4) >> 2);
+            dest_row[x_dst + 5] = CONV(b4);
+        }
+        dest_row[x_dst] = CONV(palette_spaced[src_row[x_src] & 0x1f]);
+    }
+}
+
+/* 256×192 → 320×240 via 4:5 integer blocks (SCALING_FULL / CUSTOM). */
+static void
+blit_sms_full(bitmap_t *bmp, uint16_t *framebuffer)
+{
     if (bmp->viewport.w != SMS_WIDTH || bmp->viewport.h != SMS_HEIGHT) {
         blit_scale_centered(bmp, framebuffer);
         return;
@@ -371,6 +456,66 @@ blit_sms(bitmap_t *bmp, uint16_t *framebuffer)
                 framebuffer[((y_dst + 4) * WIDTH) + x + x_dst] = CONV(b3);
             }
         }
+    }
+}
+
+static void
+blit_gg(bitmap_t *bmp, uint16_t *framebuffer)
+{
+    odroid_display_scaling_t scaling = odroid_display_get_scaling_mode();
+
+    if (scaling == ODROID_DISPLAY_SCALING_OFF) {
+        blit_normal(bmp, framebuffer);
+        return;
+    }
+
+    /* Integer 2× / 5:3 fills the panel for standard GG; letterbox otherwise. */
+    if (bmp->viewport.w != GG_WIDTH || bmp->viewport.h != GG_HEIGHT) {
+        blit_scale_centered(bmp, framebuffer);
+        return;
+    }
+
+    int y_src = 0;
+    int y_dst = 0;
+    for (; y_src < bmp->viewport.h; y_src += 3, y_dst += 5) {
+        int x_src = 0;
+        int x_dst = 0;
+        for (; x_src < bmp->viewport.w; x_src += 1, x_dst += 2) {
+            uint8_t *src_col = &bmp->data[(y_src + bmp->viewport.y) * bmp->pitch + x_src + bmp->viewport.x];
+            uint32_t b0 = palette_spaced[src_col[bmp->pitch * 0] & 0x1f];
+            uint32_t b1 = palette_spaced[src_col[bmp->pitch * 1] & 0x1f];
+            uint32_t b2 = palette_spaced[src_col[bmp->pitch * 2] & 0x1f];
+
+            framebuffer[((y_dst + 0) * WIDTH) + x_dst] = CONV(b0);
+            framebuffer[((y_dst + 1) * WIDTH) + x_dst] = CONV((b0+b1)>>1);
+            framebuffer[((y_dst + 2) * WIDTH) + x_dst] = CONV(b1);
+            framebuffer[((y_dst + 3) * WIDTH) + x_dst] = CONV((b1+b2)>>1);
+            framebuffer[((y_dst + 4) * WIDTH) + x_dst] = CONV(b2);
+
+            framebuffer[((y_dst + 0) * WIDTH) + x_dst + 1] = CONV(b0);
+            framebuffer[((y_dst + 1) * WIDTH) + x_dst + 1] = CONV((b0+b1)>>1);
+            framebuffer[((y_dst + 2) * WIDTH) + x_dst + 1] = CONV(b1);
+            framebuffer[((y_dst + 3) * WIDTH) + x_dst + 1] = CONV((b1+b2)>>1);
+            framebuffer[((y_dst + 4) * WIDTH) + x_dst + 1] = CONV(b2);
+        }
+    }
+}
+
+static void
+blit_sms(bitmap_t *bmp, uint16_t *framebuffer)
+{
+    switch (odroid_display_get_scaling_mode()) {
+    case ODROID_DISPLAY_SCALING_OFF:
+        blit_normal(bmp, framebuffer);
+        break;
+    case ODROID_DISPLAY_SCALING_FIT:
+        blit_sms_fit(bmp, framebuffer);
+        break;
+    case ODROID_DISPLAY_SCALING_FULL:
+    case ODROID_DISPLAY_SCALING_CUSTOM:
+    default:
+        blit_sms_full(bmp, framebuffer);
+        break;
     }
 }
 
@@ -428,9 +573,6 @@ static void sms_draw_frame()
   }
 
   blit();
-//  if (lcd_is_swap_pending())
-//      lcd_sleep_while_swap_pending();
-//  lcd_wait_for_vblank();
   lcd_swap();
 }
 
@@ -571,7 +713,9 @@ app_main_smsplusgx(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 
         system_frame(!drawFrame);
 
-        if (drawFrame) {
+        /* Skip present while previous swap is still in flight — avoids
+         * RGB565 tear without sleeping on VBLANK (that fights sound_sync). */
+        if (drawFrame && !lcd_is_swap_pending()) {
             sms_draw_frame();
         }
 

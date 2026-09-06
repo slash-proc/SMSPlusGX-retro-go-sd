@@ -331,6 +331,16 @@ void lcd_set_refresh_rate(uint32_t frequency)
         lcd_refresh_hz = frequency;
 }
 
+odroid_display_scaling_t odroid_display_get_scaling_mode(void)
+{
+    return ODROID_DISPLAY_SCALING_FULL;
+}
+
+odroid_display_filter_t odroid_display_get_filter_mode(void)
+{
+    return ODROID_DISPLAY_FILTER_OFF;
+}
+
 uint32_t lcd_get_last_refresh_rate(void)
 {
     return lcd_refresh_hz;

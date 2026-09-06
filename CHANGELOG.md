@@ -1,21 +1,29 @@
 # Changelog
 
-This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release tags must
-match a section heading exactly (for example `v1.0.0`).
+## [Unreleased]
 
-When you cut a release:
+### Fixed
 
-1. Move items from `[Unreleased]` into a new `## [vX.Y.Z] - YYYY-MM-DD` section.
-2. Commit the changelog update.
-3. Push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+- Game Gear Micro Machines 1 & 2: keep the ROM-header console (GG) when the
+  game DB would force SMS2 (wrong VDP/IO → purple screen / hardfault).
+- Host `crc32_le` so Codemasters mapper lookup works under `make host`
+  (SMS Micro Machines).
+- SMS blit for 224/240-line viewports (centered letterbox instead of broken
+  fixed 256×192 scaler).
+- Black screen on 40K/48K SG-1000 Multivision dumps (e.g. 007 James Bond): map
+  `$8000–$BFFF` to cartridge ROM when the image is larger than 32K.
 
-CI reads the matching section and uses it as the GitHub Release notes. Assets
-attached to the release:
+### Changed
 
-- `<binary>-<tag>.zip` — SD layout (`cores/` + packed `.bin`, plus
-  `bios/coleco/coleco.bin` for Colecovision)
-- `<binary>-<tag>-debug.zip` — ELF + linker map (use `arm-none-eabi-addr2line` for crash PC/LR → function/line)
+- Lazy YM2413: games detect FM via port `$F2` and enable synthesis on first
+  register write; PSG-only titles skip `FM_Update` CPU cost.
+- Match audio half-buffer length and LCD refresh to 50/60 Hz from the ROM
+  header (PAL / NTSC).
+- SMS scaling modes from the launcher: Off (1:1 centered), Fit (classic 5:6
+  → ~307×230), Full (4:5 → 320×240). GG keeps integer 2× / 5:3 fill; Off uses
+  1:1 centered.
+- Skip frame present while an LCD swap is still pending (reduces RGB565 tear
+  without blocking on VBLANK against `sound_sync`).
 
 ## [v0.0.1]
 
