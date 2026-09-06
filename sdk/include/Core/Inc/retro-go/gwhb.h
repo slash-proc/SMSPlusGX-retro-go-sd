@@ -22,8 +22,8 @@
  * offset 64 and no BSS assist. The loader still accepts them when
  * header_length == 0 (see run_gwhb_homebrew()).
  *
- * Assets that do not fit in RAM_EMU (zelda3.ro, *_assets.dat, …) stay as
- * sibling files on the SD card; the homebrew loads them via the ABI.
+ * Assets that do not fit in RAM_EMU (e.g. large .ro / *_assets.dat sidecars)
+ * stay as sibling files on the SD card; the homebrew loads them via the ABI.
  */
 #pragma once
 

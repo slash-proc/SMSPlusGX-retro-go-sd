@@ -55,7 +55,10 @@ for extra in \
   Core/Inc/retro-go/gnw_core_meta.h \
   Core/Inc/retro-go/gwhb.h \
   Core/Inc/gw_malloc.h \
-  Core/Inc/heap.hpp
+  Core/Inc/gw_buttons.h \
+  Core/Inc/gw_ofw.h \
+  Core/Inc/heap.hpp \
+  Core/Src/porting/lib/hw_sha1.h
 do
   [[ -f "$FW/$extra" ]] || continue
   dest="$INC_ROOT/$extra"

@@ -414,7 +414,7 @@ def parse_segment_arg(spec):
 
 
 # Optional extra segments discovered from ELF symbols when a custom
-# linker script defines them (see cores/msx/msx_core.ld for a multi-region example).
+# linker script defines them (see ld/gnw_itcm_core.ld for a multi-region INCLUDE).
 # If the triple is absent, packing is a no-op for that region.
 # AHB is intentionally omitted — AHB SRAM is the firmware malloc heap.
 AUTO_EXTRA_SEGMENTS = (
