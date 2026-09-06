@@ -236,11 +236,26 @@ void sms_reset(void)
         cpu_writemap[i] = dummy_memory;
       }
 
-      /* $8000-$BFFF mapped to external RAM (lower 16K) */
-      for(i = 0x20; i < 0x30; i++)
+      /* $8000-$BFFF: external cart RAM by default. 40K/48K SG dumps
+       * (Othello Multivision, etc.) store a second ROM chip there —
+       * SMS Power 40K layout: 8K@0000 mirrored to 7FFF + 8K@8000. */
+      if (cart.size > 0x8000)
       {
-        cpu_readmap[i]  = &cart.sram[(i & 0x0F) << 10];
-        cpu_writemap[i] = &cart.sram[(i & 0x0F) << 10];
+        uint32_t hi = cart.size - 0x8000;
+        for(i = 0x20; i < 0x30; i++)
+        {
+          uint32_t off = (i << 10) - 0x8000;
+          cpu_readmap[i]  = &cart.rom[0x8000 + (off % hi)];
+          cpu_writemap[i] = dummy_memory;
+        }
+      }
+      else
+      {
+        for(i = 0x20; i < 0x30; i++)
+        {
+          cpu_readmap[i]  = &cart.sram[(i & 0x0F) << 10];
+          cpu_writemap[i] = &cart.sram[(i & 0x0F) << 10];
+        }
       }
 
       /* $C000-$FFFF mapped to internal RAM (2K) or external RAM (upper 16K) */
