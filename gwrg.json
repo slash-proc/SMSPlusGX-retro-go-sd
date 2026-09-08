@@ -1,0 +1,35 @@
+{
+  "$comment": "The hand-written half of this project's manifest. Everything else -- the systems, their folders, extensions and browse mode, the firmware ABI, sizes and hashes -- is derived from the packed core by scripts/make_manifest.py. Nothing derivable belongs here.",
+  "systems": {
+    "sms": {
+      "shortName": "SMS",
+      "compression": false
+    },
+    "gg": {
+      "shortName": "GG",
+      "compression": false
+    },
+    "sg": {
+      "shortName": "SG-1000",
+      "compression": false
+    },
+    "col": {
+      "shortName": "CV",
+      "compression": false,
+      "biosDir": "coleco",
+      "bios": [
+        {
+          "id": "coleco",
+          "filename": "coleco.bin",
+          "required": false,
+          "label": {
+            "en": "ColecoVision BIOS"
+          },
+          "description": {
+            "en": "The 8 KB ColecoVision boot ROM, read from /bios/coleco/coleco.bin. The ColecoVision ROM folder is col but its BIOS folder is coleco, so the two keys differ. This core also carries a copy of the boot ROM inside its own binary, so games run without the file present."
+          }
+        }
+      ]
+    }
+  }
+}
