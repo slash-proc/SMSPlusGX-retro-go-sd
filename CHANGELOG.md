@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.0.4] - 2026-09-08
+
+### Changed
+
+- The ColecoVision boot ROM is now published by this project rather than asked
+  of the user. It was always here: `src/smsplus/coleco_bios.h` compiles the
+  8 KB ROM into a `.coleco_bios_data` section and `make coleco_bios` objcopies
+  it back out, which is how the old install zip shipped `bios/coleco/coleco.bin`.
+  The manifest entry carried no `url`, so an installer told the user to go and
+  find a file the repository already contains. The release now attaches
+  `coleco.bin` and `make_manifest.py --bios` fills in its `url`, `bytes` and
+  `sha256` from the file itself, which makes it a mirrored, hash-checked
+  artifact like every other published file and drops it from what the user has
+  to supply.
+
 ## [v0.0.3] - 2026-09-08
 
 ### Added

@@ -62,7 +62,7 @@ jobs:
             -v "${{ github.workspace }}:/opt/workdir" \
             -w /opt/workdir \
             "${{ env.DOCKER_IMAGE }}" \
-            make --no-print-directory -j"$(nproc)" all
+            make --no-print-directory -j"$(nproc)" all coleco_bios
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -73,6 +73,7 @@ jobs:
             ${{ steps.meta.outputs.target_elf }}
             ${{ steps.meta.outputs.target_map }}
             ${{ steps.meta.outputs.ro_bin }}
+            bios/coleco/coleco.bin
           if-no-files-found: error
 
   release:
@@ -131,6 +132,18 @@ jobs:
           cp "dist/${TARGET_ELF}" "release/$(basename "${TARGET_ELF}")"
           echo "$(basename "${TARGET_ELF}")" >> release/release-files.txt
 
+      # The ColecoVision boot ROM this project already carries, compiled into
+      # the ELF and objcopied out by `make coleco_bios` in the build job. It
+      # rides along as a build artifact rather than being regenerated here:
+      # extracting it needs the cross toolchain and the linked ELF, neither of
+      # which the release runner has. Attached loose so the mirror can fetch it
+      # -- build_dist.py fetches every file the manifest names off the release.
+      - name: Stage the ColecoVision BIOS
+        run: |
+          set -euo pipefail
+          cp dist/bios/coleco/coleco.bin release/coleco.bin
+          echo coleco.bin >> release/release-files.txt
+
       - name: Generate the dist manifest
         run: |
           set -euo pipefail
@@ -153,6 +166,7 @@ jobs:
             --bin "release/${PACKED_BIN}" \
             "${ARTIFACTS[@]}" \
             --elf "release/$(basename "${TARGET_ELF}")" \
+            --bios release/coleco.bin \
             --tag "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --commit "${GITHUB_SHA}" \
