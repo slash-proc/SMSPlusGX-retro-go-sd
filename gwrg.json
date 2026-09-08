@@ -21,13 +21,14 @@
         {
           "id": "coleco",
           "filename": "coleco.bin",
-          "required": false,
+          "required": true,
           "label": {
             "en": "ColecoVision BIOS"
           },
           "description": {
-            "en": "The 8 KB ColecoVision boot ROM, read from /bios/coleco/coleco.bin. The ColecoVision ROM folder is col but its BIOS folder is coleco, so the two keys differ. This core also carries a copy of the boot ROM inside its own binary, so games run without the file present."
-          }
+            "en": "The 8 KB ColecoVision boot ROM. ColecoVision games need it: the core reads it into a freshly allocated buffer at load time and has no fallback, so without it a game starts on uninitialised memory. Note the folder keys differ -- games live in roms/col/, this file in /bios/coleco/."
+          },
+          "bytes": 8192
         }
       ]
     }
