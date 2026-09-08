@@ -1,5 +1,42 @@
 # Changelog
 
+## [v0.0.3] - 2026-09-08
+
+### Added
+
+- Published under the [GWRG distribution
+  spec](https://github.com/slash-proc/gwrg-dist-spec): a `manifest.json`
+  describing this core and the four systems it provides, an offline bundle, and
+  a GitHub Pages mirror of `dist/` that a web installer can read without a
+  human in the loop.
+- `symbols[]` publishes the linked ELF so a crash address from a device can be
+  resolved back to a function. It is named by the manifest and mirrored, but is
+  not part of the install set and never reaches the card.
+- `gwrg.json`, the hand-written half of the manifest: the short console name
+  for each system and whether compressed ROMs work. Everything else -- the
+  systems, their folders, extensions and browse mode, the firmware ABI, sizes
+  and hashes -- is derived from the packed binary at release time, so the
+  manifest and the firmware cannot disagree about which folder a system reads.
+- Master System, Game Gear, SG-1000 and ColecoVision are declared as four
+  systems from one binary, keyed by the `sms`, `gg`, `sg` and `col` folders the
+  packed core names.
+- ColecoVision declares `biosDir: coleco`, because its ROM folder is `col` but
+  its boot ROM is read from `/bios/coleco/`. A consumer cannot derive one key
+  from the other, and guessing `bios/col` would put the file somewhere nothing
+  looks for it. The entry is marked optional: this core carries a copy of the
+  boot ROM in its own binary and plays ColecoVision games without the file.
+
+### Changed
+
+- `scripts/make_manifest.py`, `build_dist.py`, `make_bundle.py` and
+  `stage_release.py` are now the shared copies, byte-identical across every
+  project. A script that has to be edited on the way in is a script that
+  drifts.
+- The Makefile answers `print-SIDECARS` and `print-RO_BIN`. The shared
+  `stage_release.py` reads Makefile variables positionally, so a missing
+  `print-` target does not degrade gracefully -- it fails the release outright.
+  This core installs no file beside the packed binary, so both are empty.
+
 ## [v0.0.2]
 
 ### Fixed
