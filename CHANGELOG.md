@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.0.5] - 2026-09-09
+
+### Fixed
+
+- The version index no longer counts a BIOS this project ships as a file the
+  user must supply. `needsUserFiles` said true while the manifest implied
+  false, because the index was built before the shared script learned the
+  difference.
+
 ## [v0.0.4] - 2026-09-08
 
 ### Changed
