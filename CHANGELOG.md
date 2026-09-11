@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.0.6] - 2026-09-11
+
+### Fixed
+
+- The manifest declares `biosDir` again, so an installer puts the ColecoVision
+  boot ROM where the core reads it. `col` is the ROM folder key and `coleco`
+  the BIOS folder key -- `main_sms.c` loads `/bios/coleco/coleco.bin` -- and
+  `gwrg.json` has said so since the field existed. The shared manifest
+  generator accepted the value, validated it, and then dropped it from the
+  system it emitted, so every release up to v0.0.5 published a manifest with no
+  `biosDir` at all and an installer wrote `coleco.bin` to `/bios/col/`. Since
+  v0.0.4 this project ships that ROM itself, which means the install put a file
+  in the wrong folder rather than merely asking for one there.
+
 ## [v0.0.5] - 2026-09-09
 
 ### Fixed
