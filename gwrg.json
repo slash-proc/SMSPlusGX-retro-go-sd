@@ -2,19 +2,23 @@
   "systems": {
     "sms": {
       "shortName": "SMS",
-      "compression": false
+      "compression": false,
+      "runtime": { "savestate": { "supported": true }, "save": { "supported": false } }
     },
     "gg": {
       "shortName": "GG",
-      "compression": false
+      "compression": false,
+      "runtime": { "savestate": { "supported": true }, "save": { "supported": false } }
     },
     "sg": {
       "shortName": "SG-1000",
-      "compression": false
+      "compression": false,
+      "runtime": { "savestate": { "supported": true }, "save": { "supported": false } }
     },
     "col": {
       "shortName": "CV",
       "compression": false,
+      "runtime": { "savestate": { "supported": true }, "save": { "supported": false } },
       "biosDir": "coleco",
       "bios": [
         {
