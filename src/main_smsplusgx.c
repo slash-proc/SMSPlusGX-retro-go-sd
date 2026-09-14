@@ -713,9 +713,7 @@ app_main_smsplusgx(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 
         system_frame(!drawFrame);
 
-        /* Skip present while previous swap is still in flight — avoids
-         * RGB565 tear without sleeping on VBLANK (that fights sound_sync). */
-        if (drawFrame && !lcd_is_swap_pending()) {
+        if (drawFrame) {
             sms_draw_frame();
         }
 
