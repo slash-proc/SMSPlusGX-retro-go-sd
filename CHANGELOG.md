@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.8] - 2026-09-16
+
+### Fixed
+
+- Improved video synchronization by removing the `lcd_is_swap_pending()` check.
+
 ## [v0.0.7] - 2026-09-13
 
 ### Changed
